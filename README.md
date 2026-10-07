@@ -22,13 +22,9 @@ http://localhost:3000
 
 One Pub/Sub topic, `GOOGLE_PUBSUB_TOPIC`. Give `gmail-api-push@system.gserviceaccount.com` Publisher on it.
 
-The push endpoint is:
+Point the Pub/Sub push subscription at the Gmail webhook URL Hub gives you on `https://auth.corsair.dev`. Hub checks the notification and delivers it to this app. Locally that comes in through the Corsair tunnel at `/api/corsair`. In production Hub posts to the delivery URL you set in the dashboard.
 
-```
-https://<your-domain>/api/webhook
-```
-
-The notification includes the Gmail address, and that address picks the mailbox. The Corsair tunnel only forwards `/api/corsair`, so Pub/Sub has to hit `/api/webhook` on a URL that reaches the app.
+The notification includes the Gmail address, and that address picks the mailbox.
 
 Watches get renewed by `/api/cron/renew-watches` (see `vercel.json`). It expects `Authorization: Bearer $CRON_SECRET`.
 
