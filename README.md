@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inboxly
 
-## Getting Started
+Gmail and Google Calendar client. Live data goes through [Corsair](https://corsair.dev). `DEMO_MODE=true` is a single switch that loads a realistic mailbox so the UI still runs when Google is unreachable.
 
-First, run the development server:
+Auth falls back to a hardcoded tenant `demo` (Alex Chen) when `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` are not all set. Set those three to turn on Google sign-in; the tenant id is then the Better Auth user id.
+
+## Local
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`pnpm dev` starts embedded Postgres on port `54329` when `DATABASE_URL` is unset, defaults `DEMO_MODE` to `true`, and opens Next on http://localhost:3000. Copy `.env.example` to `.env.local` before a live Google demo.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test:unit
+pnpm test:e2e
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Live Google
 
-## Learn More
+1. Create a Corsair project and copy `CORSAIR_API_KEY`, `CORSAIR_SIGNING_SECRET`, and a `CORSAIR_KEK` (`openssl rand -base64 32`).
+2. In Google Cloud, enable the Gmail API and the Calendar API. Create an OAuth client. The Corsair redirect is `https://auth.corsair.dev/oauth/callback`.
+3. Create a Pub/Sub topic. Grant `gmail-api-push@system.gserviceaccount.com` the Publisher role. Set `GOOGLE_PUBSUB_TOPIC` to `projects/<project>/topics/<topic>`.
+4. Create a push subscription on that topic. The endpoint is your public webhook, including the tenant:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+ngrok http 3000
+# delivery URL you register in Google:
+# https://<ngrok-host>/api/webhook?tenantId=<better-auth user id, or demo>
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`GOOGLE_PUBSUB_AUDIENCE` is the OIDC audience Corsair Hub checks on that push. Gmail does not deliver to the Hub URL itself; Calendar channel watches do, and Corsair renews both.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+5. Set `DEMO_MODE=false`. Sign in, open Settings, connect Gmail and Calendar, then Register watches. The first sync pulls about 200 inbox threads and calendar events from 30 days ago through 60 days ahead.
+6. A `ck_dev_` API key opens a Corsair tunnel on the first request to `/api/corsair`. Point Calendar's watch at that tunnel if you are not using ngrok for Hub delivery. Gmail still needs the Pub/Sub push URL above.
 
-## Deploy on Vercel
+`/debug` (development, or `ENABLE_DEBUG=true`) lists recent webhook rows, watch expiry, and can replay the last event.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploy
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Set every variable in `.env.example` on the Vercel project. `DEMO_MODE=false` for a real mailbox.
+- `vercel.json` runs `/api/cron/renew-watches` every 6 hours. Vercel sends `Authorization: Bearer $CRON_SECRET`. Watches expire in about 7 days; the job renews them through Corsair.
+- Use a hosted Postgres. Do not rely on the embedded database.
+- Confirm `/api/corsair` is reachable, the Hub delivery URL is the production origin, and the Pub/Sub push URL is `https://<domain>/api/webhook?tenantId=<id>`.
+- `pnpm build` must pass before promoting.
+
+## What stays in this app's tables
+
+Drizzle owns users, sessions, drafts, AI summaries, webhook event log, settings, sync state, and the demo mailbox. Corsair owns its own tables in the same database. Message bodies are not written to the webhook log.
