@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ["pg", "corsair", "isomorphic-dompurify"],
+  allowedDevOrigins: ["127.0.0.1", "*.corsair.dev", "*.corsair.run"],
 };
 
 export default nextConfig;
