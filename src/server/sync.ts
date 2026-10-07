@@ -96,9 +96,38 @@ async function saveThread(tenant: Tenant, id: string) {
   }
 }
 
-async function threadIds(tenant: Tenant, label: string, maxResults: number) {
-  const page = await tenant.gmail.api.threads.list({ labelIds: [label], maxResults });
+function threadIdsOf(page: { threads?: { id?: string | null }[] | null }) {
   return (page.threads ?? []).map((thread) => thread.id).filter((id): id is string => Boolean(id));
+}
+
+async function threadIds(tenant: Tenant, label: string, maxResults: number) {
+  return threadIdsOf(await tenant.gmail.api.threads.list({ labelIds: [label], maxResults }));
+}
+
+const inboxCursor = new Map<string, string>();
+const inboxSeen = new Map<string, number>();
+
+async function loadInboxPage(tenant: Tenant, tenantId: string): Promise<{ phase: "more" | "done"; progress: number }> {
+  const token = inboxCursor.get(tenantId);
+  if (token === "") return { phase: "done", progress: 100 };
+  const page = await tenant.gmail.api.threads.list({
+    labelIds: ["INBOX"],
+    maxResults: 20,
+    ...(token ? { pageToken: token } : {}),
+  });
+  const ids = threadIdsOf(page);
+  await saveMissing(tenant, tenantId, ids);
+  const seen = (inboxSeen.get(tenantId) ?? 0) + ids.length;
+  inboxSeen.set(tenantId, seen);
+  inboxCursor.set(tenantId, page.nextPageToken ?? "");
+  const estimate = Math.max(page.resultSizeEstimate ?? seen, seen);
+  const progress = page.nextPageToken ? Math.min(95, Math.round((seen / estimate) * 100)) : 100;
+  await writeState(tenantId, "gmail", {
+    status: page.nextPageToken ? "syncing" : "ready",
+    progress,
+    detail: page.nextPageToken ? "Loading your mail" : "Up to date",
+  });
+  return { phase: page.nextPageToken ? "more" : "done", progress };
 }
 
 async function hasBody(tenantId: string, id: string) {
@@ -202,6 +231,10 @@ async function runSyncStep(tenantId: string) {
   try {
     const tenant = withTenant(tenantId);
     try {
+      const loaded = await loadInboxPage(tenant, tenantId);
+      if (loaded.phase === "more") {
+        return { done: false, progress: loaded.progress, detail: "Loading your mail", waitMs: 1_500 };
+      }
       await refreshRecent(tenant, tenantId);
     } catch (error) {
       if (shouldPause(apiReason(error))) {

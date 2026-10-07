@@ -335,7 +335,7 @@ export function MailApp() {
             <div className="absolute inset-y-0 left-0 z-10 bg-[#f6f8fc] shadow-xl"><GmailSidebar {...sidebarProps} collapsed={false} /></div>
           </div>
         ) : null}
-        <section className="mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-background">
+        <section className="mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white text-[#202124]">
         {folder === "inbox" ? (
           <Tabs value={category} onValueChange={(value) => setCategory(value as typeof category)}>
             <TabsList variant="line" className="px-3">
@@ -345,7 +345,7 @@ export function MailApp() {
             </TabsList>
           </Tabs>
         ) : null}
-        {!session.data?.demo && threads.length === 0 && sync.data?.some((item) => item.status === "syncing") ? (
+        {!session.data?.demo && sync.data?.some((item) => item.plugin === "gmail" && item.status === "syncing") ? (
           <p className="px-4 py-2 text-xs text-[#5f6368]">Loading your mail… {sync.data.find((item) => item.plugin === "gmail")?.progress ?? 0}%</p>
         ) : null}
         <div className="flex min-h-0 flex-1">
