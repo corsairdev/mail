@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS corsair_events (
     payload JSONB NOT NULL DEFAULT '{}',
     status TEXT
 );
+DO $$
+BEGIN
+  CREATE INDEX corsair_entities_message_date
+  ON corsair_entities ((data->>'internalDate') DESC)
+  WHERE entity_type = 'messages';
+EXCEPTION
+  WHEN duplicate_table OR unique_violation THEN NULL;
+END $$;
 CREATE TABLE IF NOT EXISTS corsair_permissions (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

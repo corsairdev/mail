@@ -162,12 +162,16 @@ function fromEntity(row: unknown): Normalized | null {
   };
 }
 
-async function cachedMessages(tenantId: string, threadId?: string): Promise<Normalized[]> {
-  const params: string[] = [tenantId];
+async function cachedMessages(tenantId: string, threadId?: string, limit?: number): Promise<Normalized[]> {
+  const params: unknown[] = [tenantId];
   let threadSql = "";
+  let boundSql = "";
   if (threadId) {
     params.push(threadId);
     threadSql = "and (e.data->>'threadId' = $2 or e.entity_id = $2)";
+  } else if (limit) {
+    params.push(limit);
+    boundSql = "order by e.data->>'internalDate' desc limit $2";
   }
   const dataSql = threadId
     ? "e.data"
@@ -182,12 +186,22 @@ async function cachedMessages(tenantId: string, threadId?: string): Promise<Norm
         'labelIds', e.data->'labelIds'
       )`;
   const result = await getPool().query<{ data: unknown }>(
-    `select ${dataSql} as data
-     from corsair_entities e
-     join corsair_accounts a on a.id = e.account_id
-     join corsair_integrations i on i.id = a.integration_id
-     where a.tenant_id = $1 and i.name = 'gmail' and e.entity_type = 'messages'
-     ${threadSql}`,
+    threadId
+      ? `select ${dataSql} as data
+         from corsair_entities e
+         join corsair_accounts a on a.id = e.account_id
+         join corsair_integrations i on i.id = a.integration_id
+         where a.tenant_id = $1 and i.name = 'gmail' and e.entity_type = 'messages'
+         ${threadSql}`
+      : `select ${dataSql} as data
+         from (
+           select e.data
+           from corsair_entities e
+           join corsair_accounts a on a.id = e.account_id
+           join corsair_integrations i on i.id = a.integration_id
+           where a.tenant_id = $1 and i.name = 'gmail' and e.entity_type = 'messages'
+           ${boundSql}
+         ) e`,
     params,
   );
   return result.rows.map((row) => fromEntity({ data: row.data })).filter((item): item is Normalized => item !== null);
@@ -208,7 +222,7 @@ export async function listThreads(input: {
     messages = (await loadDemoMessages(input.tenantId)).map(fromDemo);
   } else {
     try {
-      messages = await cachedMessages(input.tenantId);
+      messages = await cachedMessages(input.tenantId, undefined, Math.min(input.limit * 5, 2000));
     } catch (error) {
       throw toAppError(error);
     }
@@ -283,7 +297,10 @@ export async function listLabels(tenantId: string): Promise<MailLabel[]> {
   }
   try {
     const tenant = withTenant(tenantId);
-    const result = await tenant.gmail.api.labels.list({});
+    const result = await Promise.race([
+      tenant.gmail.api.labels.list({}),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("labels timeout")), 3000)),
+    ]);
     return (result.labels ?? [])
       .filter((label) => label.id && label.name)
       .map((label) => ({
@@ -293,6 +310,7 @@ export async function listLabels(tenantId: string): Promise<MailLabel[]> {
         unread: label.threadsUnread ?? 0,
       }));
   } catch (error) {
+    if (error instanceof Error && error.message === "labels timeout") return [];
     const app = toAppError(error);
     if (app.code === "AUTH_MISSING" || app.code === "RECONNECT" || app.code === "RATE_LIMIT") return [];
     throw app;

@@ -41,14 +41,6 @@ function build() {
         webhookHooks: {
           messageChanged: {
             after: async (ctx, result) => {
-              const event = result.data;
-              const threadId = event?.message?.threadId ?? event?.message?.id;
-              if (ctx.tenantId && threadId && event?.type !== "messageDeleted") {
-                const { ingestThread } = await import("./sync");
-                await ingestThread(ctx.tenantId, threadId).catch((cause: unknown) => {
-                  console.error("[webhook] save", cause instanceof Error ? cause.message : "failed");
-                });
-              }
               await recordWebhook("gmail", result.data ?? result, ctx.tenantId);
             },
           },

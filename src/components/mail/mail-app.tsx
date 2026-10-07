@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createAuthClient } from "better-auth/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSubscription } from "@trpc/tanstack-react-query";
 import { toast } from "sonner";
@@ -14,6 +16,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmailBody } from "./email-body";
 import { Composer, type ComposeValue } from "./composer";
 import { GmailSidebar, type MailFolder } from "./gmail-sidebar";
+
+const authClient = createAuthClient();
 
 const emptyCompose = (): ComposeValue => ({
   to: [],
@@ -52,11 +56,12 @@ export function MailApp() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [proposal, setProposal] = useState<{ summary: string; start: string; end: string; timeZone: string; attendees: string[]; meet: boolean; description: string } | null>(null);
   const [limit, setLimit] = useState(80);
+  const [refreshing, setRefreshing] = useState(false);
 
   const listInput = { folder, labelId, category: folder === "inbox" ? category : undefined, query, limit };
   const list = useQuery({ ...trpc.mail.list.queryOptions(listInput), refetchInterval: 2000 });
   const labels = useQuery(trpc.mail.labels.queryOptions());
-  const contacts = useQuery(trpc.mail.contacts.queryOptions());
+  const contacts = useQuery({ ...trpc.mail.contacts.queryOptions(), enabled: compose !== null });
   const thread = useQuery({ ...trpc.mail.thread.queryOptions({ id: openId ?? "none" }), enabled: Boolean(openId) });
   const sync = useQuery(trpc.sync.state.queryOptions());
 
@@ -70,15 +75,20 @@ export function MailApp() {
     let stop = false;
     const run = async () => {
       while (!stop) {
-        await client.sync.step.mutate();
-        await queryClient.invalidateQueries(trpc.mail.list.queryFilter());
-        const result = await queryClient.fetchQuery(trpc.sync.state.queryOptions());
+        try {
+          await client.sync.step.mutate();
+          await queryClient.invalidateQueries(trpc.mail.list.queryFilter());
+        } catch {
+          // keep polling; one failed fetch should not stop new mail
+        }
+        if (stop) return;
+        const result = await queryClient.fetchQuery(trpc.sync.state.queryOptions()).catch(() => []);
         const gmail = result.find((item) => item.plugin === "gmail");
         if (gmail?.status === "needs_connect" || stop) return;
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     };
-    void run().catch(() => undefined);
+    void run();
     return () => {
       stop = true;
     };
@@ -133,6 +143,19 @@ export function MailApp() {
   }));
 
   const invalidate = () => queryClient.invalidateQueries(trpc.mail.list.queryFilter());
+
+  async function refreshInbox() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      if (!session.data?.demo) await client.sync.step.mutate();
+      await queryClient.invalidateQueries(trpc.mail.list.queryFilter());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not refresh");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const archive = useMutation(trpc.mail.archive.mutationOptions({
     onMutate: async ({ threadId }) => {
@@ -323,9 +346,11 @@ export function MailApp() {
         <div className="relative mx-auto w-full max-w-[720px]">
           <Search className="absolute top-3.5 left-4 size-5 text-[#444746]" />
           <Input id="mail-search" aria-label="Search mail" data-testid="mail-search" className="h-12 rounded-lg border-0 bg-[#eaf1fb] pr-12 pl-12 shadow-none focus-visible:bg-background focus-visible:shadow-md" placeholder="Search mail" value={search} onChange={(event) => setSearch(event.target.value)} />
-          <button type="button" aria-label="Refresh" className="absolute top-3 right-3 text-[#444746]" onClick={() => invalidate()}><RefreshCw className="size-5" /></button>
+          <button type="button" aria-label="Refresh" disabled={refreshing} className="absolute top-1 right-1 z-10 grid size-10 place-items-center rounded-full text-[#444746] hover:bg-[#d3e3fd] disabled:opacity-60" onClick={() => void refreshInbox()}>
+            <RefreshCw className={`size-5 ${refreshing ? "animate-spin" : ""}`} />
+          </button>
         </div>
-        {session.isPending ? <span data-testid="connection-state" className="sr-only">Loading</span> : session.data?.demo ? <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 sm:inline" data-testid="connection-state">Demo mailbox</span> : <span data-testid="connection-state" className="hidden max-w-40 truncate text-xs text-[#444746] sm:inline">{session.data?.user.email}</span>}
+        {session.isPending ? <span data-testid="connection-state" className="sr-only">Loading</span> : session.data?.demo ? <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 sm:inline" data-testid="connection-state">Demo mailbox</span> : session.data?.user.email ? <AccountMenu name={session.data.user.name} email={session.data.user.email} image={session.data.user.image} /> : null}
       </header>
       <div className="flex min-h-0 flex-1">
         <aside className="hidden shrink-0 md:block"><GmailSidebar {...sidebarProps} collapsed={collapsed} /></aside>
@@ -345,8 +370,8 @@ export function MailApp() {
             </TabsList>
           </Tabs>
         ) : null}
-        {!session.data?.demo && sync.data?.some((item) => item.plugin === "gmail" && item.status === "syncing") ? (
-          <p className="px-4 py-2 text-xs text-[#5f6368]">Loading your mail… {sync.data.find((item) => item.plugin === "gmail")?.progress ?? 0}%</p>
+        {!session.data?.demo && threads.length === 0 && sync.data?.some((item) => item.plugin === "gmail" && item.status === "syncing") ? (
+          <p className="px-4 py-2 text-xs text-[#5f6368]">Loading your mail…</p>
         ) : null}
         <div className="flex min-h-0 flex-1">
           <div
@@ -485,6 +510,36 @@ export function MailApp() {
             send.mutate({ ...compose, to, attachments });
           }}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function AccountMenu({ name, email, image }: { name: string; email: string; image: string | null }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const initial = (name || email).slice(0, 1).toUpperCase();
+
+  async function signOut() {
+    await authClient.signOut();
+    router.replace("/sign-in");
+    router.refresh();
+  }
+
+  return (
+    <div className="relative shrink-0">
+      <button type="button" aria-label="Account" aria-expanded={open} className="grid size-8 place-items-center overflow-hidden rounded-full bg-[#e8f0fe] text-sm font-medium text-[#1967d2]" onClick={() => setOpen((value) => !value)}>
+        {image ? <img src={image} alt="" className="size-8 object-cover" /> : initial}
+      </button>
+      {open ? (
+        <>
+          <button type="button" aria-label="Close account menu" className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-30 mt-2 w-64 rounded-2xl bg-white p-3 text-[#202124] shadow-[0_1px_3px_rgba(60,64,67,.3),0_4px_8px_3px_rgba(60,64,67,.15)]">
+            <p className="truncate text-sm font-medium">{name || email}</p>
+            <p className="truncate text-xs text-[#5f6368]">{email}</p>
+            <button type="button" className="mt-3 h-9 w-full rounded-full text-sm hover:bg-[#f1f3f4]" onClick={() => void signOut()}>Sign out</button>
+          </div>
+        </>
       ) : null}
     </div>
   );

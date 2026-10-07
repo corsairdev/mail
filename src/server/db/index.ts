@@ -26,9 +26,14 @@ export function getDb(): AppDb {
 
 export function ensureReady(): Promise<void> {
   ready ??= (async () => {
-    const database = getDb();
-    await migrate(database, { migrationsFolder: "./drizzle" });
-    await getPool().query(CORSAIR_SQL);
+    try {
+      const database = getDb();
+      await migrate(database, { migrationsFolder: "./drizzle" });
+      await getPool().query(CORSAIR_SQL);
+    } catch (error) {
+      ready = undefined;
+      throw error;
+    }
   })();
   return ready;
 }

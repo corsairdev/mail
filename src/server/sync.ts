@@ -77,8 +77,9 @@ export async function readSync(tenantId: string) {
 
 type Tenant = ReturnType<typeof withTenant>;
 
-async function saveThread(tenant: Tenant, id: string) {
+async function saveThread(tenant: Tenant, id: string, historyId?: string | null) {
   const thread = await tenant.gmail.api.threads.get({ id, format: "full" });
+  const stamp = thread.historyId ?? historyId ?? "";
   for (const message of thread.messages ?? []) {
     if (!message.id) continue;
     await tenant.gmail.db.messages.upsertByEntityId(message.id, {
@@ -87,6 +88,7 @@ async function saveThread(tenant: Tenant, id: string) {
       labelIds: message.labelIds ?? [],
       snippet: message.snippet ?? "",
       internalDate: messageMillis(message.internalDate),
+      threadHistoryId: stamp,
       from: messageHeader(message, "From"),
       to: messageHeader(message, "To"),
       subject: messageHeader(message, "Subject"),
@@ -120,14 +122,13 @@ async function loadInboxPage(tenant: Tenant, tenantId: string): Promise<{ phase:
   const seen = (inboxSeen.get(tenantId) ?? 0) + ids.length;
   inboxSeen.set(tenantId, seen);
   inboxCursor.set(tenantId, page.nextPageToken ?? "");
-  const estimate = Math.max(page.resultSizeEstimate ?? seen, seen);
-  const progress = page.nextPageToken ? Math.min(95, Math.round((seen / estimate) * 100)) : 100;
+  const opening = Boolean(page.nextPageToken) && seen < 80;
   await writeState(tenantId, "gmail", {
-    status: page.nextPageToken ? "syncing" : "ready",
-    progress,
-    detail: page.nextPageToken ? "Loading your mail" : "Up to date",
+    status: opening ? "syncing" : "ready",
+    progress: opening ? Math.min(90, seen) : 100,
+    detail: opening ? "Loading your mail" : "Up to date",
   });
-  return { phase: page.nextPageToken ? "more" : "done", progress };
+  return { phase: page.nextPageToken ? "more" : "done", progress: opening ? Math.min(90, seen) : 100 };
 }
 
 async function hasBody(tenantId: string, id: string) {
@@ -149,13 +150,27 @@ async function saveMissing(tenant: Tenant, tenantId: string, ids: string[]) {
   }
 }
 
+async function isCurrent(tenantId: string, id: string, historyId?: string | null) {
+  const known = await getPool().query<{ history: string | null }>(
+    `select e.data->>'threadHistoryId' as history
+     from corsair_entities e
+     join corsair_accounts a on a.id = e.account_id
+     where a.tenant_id = $1 and e.entity_type = 'messages'
+       and e.data->>'threadId' = $2 and coalesce(e.data->>'from', '') <> ''
+     limit 1`,
+    [tenantId, id],
+  );
+  const row = known.rows[0];
+  if (!row || !historyId || !row.history) return false;
+  return row.history === historyId;
+}
+
 async function refreshRecent(tenant: Tenant, tenantId: string) {
-  const inbox = await threadIds(tenant, "INBOX", 5);
-  await saveMissing(tenant, tenantId, inbox);
-  try {
-    await saveMissing(tenant, tenantId, await threadIds(tenant, "SENT", 3));
-  } catch (error) {
-    if (!shouldPause(apiReason(error))) throw error;
+  const page = await tenant.gmail.api.threads.list({ labelIds: ["INBOX"], maxResults: 15 });
+  for (const thread of page.threads ?? []) {
+    if (!thread.id) continue;
+    if (await isCurrent(tenantId, thread.id, thread.historyId)) continue;
+    await saveThread(tenant, thread.id, thread.historyId);
   }
 }
 
@@ -182,7 +197,7 @@ function quietLeft(tenantId: string) {
 }
 
 function hushGmail(tenantId: string) {
-  gmailQuietUntil.set(tenantId, Date.now() + 25_000);
+  gmailQuietUntil.set(tenantId, Date.now() + 60_000);
 }
 
 export function kickSync(tenantId: string) {
@@ -205,7 +220,14 @@ export function kickSync(tenantId: string) {
 
 export async function syncStep(tenantId: string) {
   if (isDemoMode()) return runSyncStep(tenantId);
-  kickSync(tenantId);
+  if (quietLeft(tenantId) === 0 && getCorsair()) {
+    try {
+      await refreshRecent(withTenant(tenantId), tenantId);
+    } catch (error) {
+      if (shouldPause(apiReason(error))) hushGmail(tenantId);
+      else console.error("[sync] recent", apiReason(error));
+    }
+  }
   const rows = await readSync(tenantId);
   const gmail = rows.find((row) => row.plugin === "gmail");
   return {
@@ -231,10 +253,6 @@ async function runSyncStep(tenantId: string) {
   try {
     const tenant = withTenant(tenantId);
     try {
-      const loaded = await loadInboxPage(tenant, tenantId);
-      if (loaded.phase === "more") {
-        return { done: false, progress: loaded.progress, detail: "Loading your mail", waitMs: 1_500 };
-      }
       await refreshRecent(tenant, tenantId);
     } catch (error) {
       if (shouldPause(apiReason(error))) {
@@ -313,5 +331,21 @@ export async function registerWatches(tenantId: string) {
 export async function renewAllWatches() {
   const corsair = getCorsair();
   if (!corsair || isDemoMode()) return { renewed: [], failed: [] };
+  const gmailCreds: Record<string, string> = {};
+  const calendarCreds: Record<string, string> = {};
+  if (process.env.GOOGLE_CLIENT_ID) {
+    gmailCreds.client_id = process.env.GOOGLE_CLIENT_ID;
+    calendarCreds.client_id = process.env.GOOGLE_CLIENT_ID;
+  }
+  if (process.env.GOOGLE_CLIENT_SECRET) {
+    gmailCreds.client_secret = process.env.GOOGLE_CLIENT_SECRET;
+    calendarCreds.client_secret = process.env.GOOGLE_CLIENT_SECRET;
+  }
+  if (process.env.GOOGLE_PUBSUB_TOPIC) gmailCreds.topic_id = process.env.GOOGLE_PUBSUB_TOPIC;
+  if (process.env.GOOGLE_PUBSUB_AUDIENCE) gmailCreds.pubsub_audience = process.env.GOOGLE_PUBSUB_AUDIENCE;
+  await setupCorsair(corsair, {
+    silent: true,
+    credentials: { gmail: gmailCreds, googlecalendar: calendarCreds },
+  });
   return renewSubscriptions(corsair);
 }
