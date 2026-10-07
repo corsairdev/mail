@@ -1,8 +1,10 @@
-<p>
-  <img src="public/corsair.png" alt="Corsair" width="56" />
-</p>
+<div align="center">
 
-# mail
+<img src="public/corsair.png" alt="Corsair" width="56" />
+
+# Mail
+
+</div>
 
 Gmail and Google Calendar. Google is wired through [Corsair](https://corsair.dev): `@corsair-dev/gmail` and `@corsair-dev/googlecalendar`.
 
