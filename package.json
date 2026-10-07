@@ -8,8 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "tsx --test src/server/logic.test.ts",
-    "test:e2e": "playwright test"
+    "test:unit": "tsx --test src/server/logic.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.72",
@@ -51,7 +50,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
