@@ -28,7 +28,7 @@ The push endpoint is:
 https://<your-domain>/api/webhook
 ```
 
-The notification includes the Gmail address, and that address picks the mailbox. On my laptop I pointed Pub/Sub at an ngrok URL, because the Corsair tunnel only forwards `/api/corsair`.
+The notification includes the Gmail address, and that address picks the mailbox. The Corsair tunnel only forwards `/api/corsair`, so Pub/Sub has to hit `/api/webhook` on a URL that reaches the app.
 
 Watches get renewed by `/api/cron/renew-watches` (see `vercel.json`). It expects `Authorization: Bearer $CRON_SECRET`.
 

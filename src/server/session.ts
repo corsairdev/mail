@@ -17,13 +17,16 @@ export async function resolveSession(): Promise<{
 }> {
   const demo = isDemoMode();
   const authEnabled = isAuthConfigured();
-  if (demo || !authEnabled) {
+  if (demo) {
     return {
-      demo,
+      demo: true,
       authEnabled,
       tenantId: DEMO_TENANT,
       user: { id: DEMO_TENANT, name: DEMO_NAME, email: DEMO_EMAIL, image: null },
     };
+  }
+  if (!authEnabled) {
+    return { demo: false, authEnabled: false, tenantId: null, user: { id: "", name: "", email: "", image: null } };
   }
   const auth = getAuth();
   const session = auth ? await auth.api.getSession({ headers: await headers() }) : null;

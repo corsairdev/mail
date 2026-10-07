@@ -39,7 +39,7 @@ export default function SettingsPage() {
         <Button variant="outline" onClick={() => watches.mutate()} disabled={watches.isPending}>Register watches</Button>
       </div>
       {session.data?.demo ? <p className="text-sm text-muted-foreground">Demo mode is on. Set DEMO_MODE=false to use a live Google account.</p> : null}
-      {!session.data?.authEnabled && !session.data?.demo ? <p className="text-sm">Google sign-in is not configured, so this browser is using the demo tenant.</p> : null}
+      {!session.data?.authEnabled && !session.data?.demo ? <p className="text-sm">Google sign-in is not configured.</p> : null}
     </div>
   );
 }
