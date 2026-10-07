@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { createAuthClient } from "better-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useConnectionStatus } from "@/lib/corsair-client";
 import { useTRPC } from "@/trpc/react";
@@ -21,7 +21,6 @@ async function installMailbox(): Promise<"ok" | "refresh"> {
 export function SignInGate() {
   const trpc = useTRPC();
   const router = useRouter();
-  const requested = useSearchParams().get("connect");
   const session = useQuery(trpc.session.queryOptions());
   const tenantId = session.data?.user.id;
   const status = useConnectionStatus(tenantId ? { tenantId } : undefined);
@@ -32,23 +31,31 @@ export function SignInGate() {
   const gmail = status.data?.gmail;
   const calendar = status.data?.googlecalendar;
   const both = gmail === "connected" && calendar === "connected";
+  const [needsConsent, setNeedsConsent] = useState(false);
 
   useEffect(() => {
     if (session.data?.demo || (session.data?.signedIn && both)) router.replace("/mail");
   }, [both, router, session.data?.demo, session.data?.signedIn]);
 
   useEffect(() => {
-    if (started.current || !tenantId || requested !== "mailbox") return;
+    if (started.current || !session.data?.signedIn || !tenantId || both || needsConsent) return;
     started.current = true;
+    setPending(true);
     void installMailbox()
       .then((result) => {
-        if (result === "ok") router.replace("/mail");
+        if (result === "refresh") {
+          setPending(false);
+          setNeedsConsent(true);
+          return;
+        }
+        router.replace("/mail");
       })
       .catch((cause: unknown) => {
         started.current = false;
+        setPending(false);
         setError(cause instanceof Error ? cause.message : "Could not connect Google.");
       });
-  }, [requested, router, tenantId]);
+  }, [both, needsConsent, router, session.data?.signedIn, tenantId]);
 
   async function openConnect() {
     setError(null);
@@ -98,14 +105,19 @@ export function SignInGate() {
   return (
     <div className="mt-8 flex w-full max-w-sm flex-col gap-3">
       <p className="truncate text-center text-xs text-[#5f6368]">{session.data.user.email}</p>
-      <ConsentButton label="Gmail" state={gmail} disabled={pending || gmail === "connected"} onClick={openConnect} />
-      <ConsentButton
-        label="Google Calendar"
-        state={calendar}
-        disabled={pending || calendar === "connected"}
-        onClick={openConnect}
-      />
-      {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
+      {needsConsent ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={openConnect}
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-[#747775] bg-white px-5 text-[15px] font-medium text-[#1f1f1f] shadow-[0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-60"
+        >
+          <GoogleMark />
+          Allow Gmail and Calendar
+        </button>
+      ) : (
+        <p className="text-center text-sm text-[#5f6368]">{error ? error : "Setting up Gmail and Calendar…"}</p>
+      )}
     </div>
   );
 }
@@ -121,27 +133,3 @@ function GoogleMark() {
   );
 }
 
-function ConsentButton({
-  label,
-  state,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  state?: string;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  const connected = state === "connected";
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-12 items-center justify-between rounded-full bg-[#c2e7ff] px-5 text-[15px] font-medium text-[#001d35] disabled:opacity-60"
-    >
-      <span>{label}</span>
-      <span className="text-sm font-normal">{connected ? "Connected" : "Connect"}</span>
-    </button>
-  );
-}

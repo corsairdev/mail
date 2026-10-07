@@ -6,8 +6,7 @@ import { syncState } from "./db/schema";
 import { getCorsair, withTenant } from "./corsair";
 import { AppError, toAppError } from "./errors";
 import { isDemoMode } from "./flags";
-import { emitLive, recentEvents } from "./live";
-import { ensureDemo, insertDemoMessage } from "./demo/store";
+import { ensureDemo } from "./demo/store";
 
 function shouldPause(reason: string) {
   return /quota|forbidden|rate/i.test(reason);
@@ -282,24 +281,4 @@ export async function renewAllWatches() {
   const corsair = getCorsair();
   if (!corsair || isDemoMode()) return { renewed: [], failed: [] };
   return renewSubscriptions(corsair);
-}
-
-export async function replayLast(tenantId: string) {
-  const events = await recentEvents(tenantId);
-  const last = events[0];
-  if (isDemoMode()) {
-    await ensureDemo(tenantId);
-    const inserted = await insertDemoMessage({
-      tenantId,
-      fromName: "Webhook",
-      fromEmail: "notify@northwind.dev",
-      to: ["alex.chen@northwind.dev"],
-      subject: last ? `Replay: ${last.summary}` : "Live webhook test",
-      html: "<p>This message was injected by the debug replay so you can prove the inbox updates without a refresh.</p>",
-      labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
-    });
-    return emitLive(tenantId, "gmail", "messageReceived", inserted.threadId, "New mail");
-  }
-  if (!last) throw new AppError("UPSTREAM", "No webhook has arrived yet.");
-  return emitLive(tenantId, last.plugin, last.eventType, last.entityId, last.summary);
 }

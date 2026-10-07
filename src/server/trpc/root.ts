@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { aiSummaries, userSettings } from "../db/schema";
 import { listEventsSince, recentEvents } from "../live";
-import { readSync, registerWatches, replayLast, syncStep } from "../sync";
+import { readSync, registerWatches, syncStep } from "../sync";
 import { DEMO_EMAIL, DEMO_NAME } from "../flags";
 
 const folder = z.enum(["inbox", "starred", "sent", "drafts", "trash", "spam", "label"]);
@@ -171,7 +171,6 @@ export const appRouter = createTRPCRouter({
     registerWatches: tenantProcedure.mutation(({ ctx }) => registerWatches(ctx.tenantId)),
     events: tenantProcedure.input(z.object({ cursor: z.number().int().min(0).default(0) })).query(({ ctx, input }) => listEventsSince(ctx.tenantId, input.cursor)),
     recent: tenantProcedure.query(({ ctx }) => recentEvents(ctx.tenantId)),
-    replay: tenantProcedure.mutation(({ ctx }) => replayLast(ctx.tenantId)),
     onEvent: tenantProcedure
       .input(z.object({ lastEventId: z.number().int().min(0).optional() }).optional())
       .subscription(async function* ({ ctx, input, signal }) {
