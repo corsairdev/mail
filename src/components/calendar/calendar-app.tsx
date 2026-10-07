@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSubscription } from "@trpc/tanstack-react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { addDays, format, startOfWeek } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -75,6 +76,15 @@ export function CalendarApp() {
   const rangeStart = view === "month" ? addDays(startOfWeek(new Date(cursor.getFullYear(), cursor.getMonth(), 1), { weekStartsOn: 0 }), 0) : days[0] ?? cursor;
   const rangeEnd = view === "month" ? addDays(rangeStart, 42) : addDays(days[days.length - 1] ?? cursor, 1);
   const events = useQuery(trpc.calendar.events.queryOptions({ timeMin: rangeStart.toISOString(), timeMax: rangeEnd.toISOString() }));
+  const live = useQuery(trpc.sync.recent.queryOptions());
+  useSubscription(trpc.sync.onEvent.subscriptionOptions({ lastEventId: live.data?.[0]?.id ?? 0 }, {
+    enabled: live.isSuccess,
+    onData(event) {
+      if (event.data.plugin === "googlecalendar") {
+        void queryClient.invalidateQueries(trpc.calendar.events.queryFilter());
+      }
+    },
+  }));
   const calendars = useQuery(trpc.calendar.calendars.queryOptions());
   const create = useMutation(trpc.calendar.create.mutationOptions({
     onSuccess: () => { toast.success(session.data?.demo ? "Event saved" : "Invite sent"); setDraft(null); void queryClient.invalidateQueries(trpc.calendar.events.queryFilter()); },

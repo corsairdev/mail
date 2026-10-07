@@ -1,4 +1,4 @@
-# Inboxly
+# mail
 
 Gmail and Google Calendar client. Live data goes through [Corsair](https://corsair.dev). `DEMO_MODE=true` is a single switch that loads a realistic mailbox so the UI still runs when Google is unreachable.
 

@@ -19,7 +19,7 @@ export default function CalendarPage() {
       <header className="flex h-16 shrink-0 items-center gap-2 pr-3 pl-1">
         <a href="/mail" className="ml-3 flex items-center gap-2">
           <img src="/corsair.png" alt="" width={32} height={32} className="size-8" />
-          <span className="text-[22px] font-normal text-[#5f6368]">Inboxly</span>
+          <span className="text-[22px] font-normal text-[#5f6368]">mail</span>
         </a>
       </header>
       <div className="flex min-h-0 flex-1">

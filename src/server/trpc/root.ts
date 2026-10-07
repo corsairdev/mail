@@ -182,7 +182,7 @@ export const appRouter = createTRPCRouter({
             cursor = event.id;
             yield tracked(String(event.id), event);
           }
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 400));
         }
       }),
   }),

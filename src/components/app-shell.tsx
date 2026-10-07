@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-dvh flex-col">
       {inbox || calendar ? null : (
       <header className="flex h-14 items-center gap-2 border-b px-3">
-        <a href="/mail" className="flex items-center gap-2 font-medium"><img src="/corsair.png" alt="" width={20} height={20} className="size-5" /> Inboxly</a>
+        <a href="/mail" className="flex items-center gap-2 font-medium"><img src="/corsair.png" alt="" width={20} height={20} className="size-5" /> mail</a>
         <nav className="ml-4 flex gap-1">
           <Button variant="ghost" onClick={() => router.push("/mail")}>Mail</Button>
           <Button variant="ghost" onClick={() => router.push("/calendar")}><Calendar className="size-4" /> Calendar</Button>

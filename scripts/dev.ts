@@ -5,7 +5,7 @@ import EmbeddedPostgres from "embedded-postgres";
 
 const port = 54329;
 const databaseDir = ".data/postgres";
-const localUrl = `postgres://postgres:postgres@127.0.0.1:${port}/inboxly`;
+const localUrl = `postgres://postgres:postgres@127.0.0.1:${port}/mail`;
 
 function postgresBinary(): string | null {
   const candidates = [
@@ -30,7 +30,7 @@ function startSystemPostgres(binary: string) {
   }
   const start = spawnSync(`${bin}/pg_ctl`, ["-D", databaseDir, "-l", ".data/postgres.log", "-o", `-p ${port}`, "start"], { stdio: "inherit" });
   if (start.status !== 0) throw new Error("pg_ctl start failed");
-  const created = spawnSync(`${bin}/createdb`, ["-h", "127.0.0.1", "-p", String(port), "-U", "postgres", "inboxly"], { encoding: "utf8" });
+  const created = spawnSync(`${bin}/createdb`, ["-h", "127.0.0.1", "-p", String(port), "-U", "postgres", "mail"], { encoding: "utf8" });
   if (created.status !== 0 && !created.stderr.includes("already exists")) {
     throw new Error(created.stderr || "createdb failed");
   }
@@ -71,9 +71,9 @@ async function startEmbeddedPostgres() {
   await postgres.start();
   const client = postgres.getPgClient();
   await client.connect();
-  const existing = await client.query("SELECT 1 FROM pg_database WHERE datname = 'inboxly'");
+  const existing = await client.query("SELECT 1 FROM pg_database WHERE datname = 'mail'");
   await client.end();
-  if (existing.rowCount === 0) await postgres.createDatabase("inboxly");
+  if (existing.rowCount === 0) await postgres.createDatabase("mail");
 }
 
 async function ensureLocalPostgres() {

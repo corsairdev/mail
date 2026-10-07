@@ -87,7 +87,7 @@ export function MailApp() {
   const events = useQuery({
     ...trpc.sync.events.queryOptions({ cursor: eventCursor ?? 0 }),
     enabled: eventCursor !== null,
-    refetchInterval: 3000,
+    refetchInterval: 1000,
   });
 
   useEffect(() => {
@@ -121,8 +121,14 @@ export function MailApp() {
 
   useSubscription(trpc.sync.onEvent.subscriptionOptions(undefined, {
     enabled: eventCursor !== null,
-    onData() {
-      void queryClient.invalidateQueries(trpc.mail.list.queryFilter());
+    onData(event) {
+      if (event.data.plugin === "gmail") {
+        void queryClient.invalidateQueries(trpc.mail.list.queryFilter());
+        void queryClient.invalidateQueries(trpc.mail.thread.queryFilter());
+      }
+      if (event.data.plugin === "googlecalendar") {
+        void queryClient.invalidateQueries(trpc.calendar.events.queryFilter());
+      }
     },
   }));
 
@@ -312,7 +318,7 @@ export function MailApp() {
         </button>
         <a href="/mail" className="mr-2 hidden items-center gap-2 sm:flex">
           <img src="/corsair.png" alt="" width={32} height={32} className="size-8" />
-          <span className="text-[22px] font-normal text-[#5f6368]">Inboxly</span>
+          <span className="text-[22px] font-normal text-[#5f6368]">mail</span>
         </a>
         <div className="relative mx-auto w-full max-w-[720px]">
           <Search className="absolute top-3.5 left-4 size-5 text-[#444746]" />

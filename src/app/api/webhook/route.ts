@@ -1,7 +1,36 @@
 import { processWebhook } from "corsair";
+import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getCorsair } from "@/server/corsair";
+import { getDb } from "@/server/db";
+import { user } from "@/server/db/schema";
 import { webhookAls } from "@/server/live";
+
+function pushEmail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const data = (body as { message?: { data?: string } }).message?.data;
+  if (!data) return null;
+  try {
+    const json = JSON.parse(Buffer.from(data, "base64").toString("utf8")) as { emailAddress?: string };
+    return json.emailAddress?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function tenantForPush(explicit: string | undefined, body: unknown) {
+  const email = pushEmail(body);
+  if (email) {
+    const [row] = await getDb()
+      .select({ id: user.id })
+      .from(user)
+      .where(sql`lower(${user.email}) = ${email}`)
+      .limit(1);
+    if (row) return row.id;
+    return undefined;
+  }
+  return explicit;
+}
 
 export async function POST(request: Request) {
   console.info("[webhook] gmail push received");
@@ -14,12 +43,13 @@ export async function POST(request: Request) {
   const body = request.headers.get("content-type")?.includes("application/json")
     ? await request.json()
     : await request.text();
-  const tenantId = new URL(request.url).searchParams.get("tenantId") ?? undefined;
+  const tenantId = await tenantForPush(new URL(request.url).searchParams.get("tenantId") ?? undefined, body);
   try {
     const result = await webhookAls.run({ tenantId: tenantId ?? "" }, () =>
       processWebhook(corsair, headers, body, tenantId ? { tenantId } : undefined),
     );
-    if (tenantId) {
+    const saved = !result.response || typeof result.response !== "object" || !("success" in result.response) || result.response.success !== false;
+    if (tenantId && !saved) {
       const { pullNewMail } = await import("@/server/sync");
       await pullNewMail(tenantId);
     }

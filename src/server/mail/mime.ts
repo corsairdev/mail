@@ -22,7 +22,7 @@ export function toBase64Url(value: string | Buffer): string {
 }
 
 export function buildRfc822(mail: OutboundMail): string {
-  const boundary = `inboxly_${Date.now().toString(36)}`;
+  const boundary = `mail_${Date.now().toString(36)}`;
   const lines = [
     `From: ${mail.from}`,
     `To: ${mail.to.join(", ")}`,

@@ -102,25 +102,30 @@ async function threadIds(tenant: Tenant, label: string, maxResults: number) {
   return (page.threads ?? []).map((thread) => thread.id).filter((id): id is string => Boolean(id));
 }
 
-async function hasBody(id: string) {
+async function hasBody(tenantId: string, id: string) {
   const known = await getPool().query(
-    "select 1 from corsair_entities where entity_type = 'messages' and data->>'threadId' = $1 and coalesce(data->>'from', '') <> '' limit 1",
-    [id],
+    `select 1
+     from corsair_entities e
+     join corsair_accounts a on a.id = e.account_id
+     where a.tenant_id = $1 and e.entity_type = 'messages'
+       and e.data->>'threadId' = $2 and coalesce(e.data->>'from', '') <> ''
+     limit 1`,
+    [tenantId, id],
   );
   return Boolean(known.rowCount);
 }
 
-async function saveMissing(tenant: Tenant, ids: string[]) {
+async function saveMissing(tenant: Tenant, tenantId: string, ids: string[]) {
   for (const id of ids) {
-    if (!(await hasBody(id))) await saveThread(tenant, id);
+    if (!(await hasBody(tenantId, id))) await saveThread(tenant, id);
   }
 }
 
-async function refreshRecent(tenant: Tenant, _tenantId: string) {
+async function refreshRecent(tenant: Tenant, tenantId: string) {
   const inbox = await threadIds(tenant, "INBOX", 5);
-  await saveMissing(tenant, inbox);
+  await saveMissing(tenant, tenantId, inbox);
   try {
-    await saveMissing(tenant, await threadIds(tenant, "SENT", 3));
+    await saveMissing(tenant, tenantId, await threadIds(tenant, "SENT", 3));
   } catch (error) {
     if (!shouldPause(apiReason(error))) throw error;
   }
@@ -142,14 +147,14 @@ export async function ingestThread(tenantId: string, threadId: string) {
 }
 
 const drains = new Set<string>();
-let gmailQuietUntil = 0;
+const gmailQuietUntil = new Map<string, number>();
 
-function quietLeft() {
-  return Math.max(0, gmailQuietUntil - Date.now());
+function quietLeft(tenantId: string) {
+  return Math.max(0, (gmailQuietUntil.get(tenantId) ?? 0) - Date.now());
 }
 
-function hushGmail() {
-  gmailQuietUntil = Date.now() + 25_000;
+function hushGmail(tenantId: string) {
+  gmailQuietUntil.set(tenantId, Date.now() + 25_000);
 }
 
 export function kickSync(tenantId: string) {
@@ -191,7 +196,7 @@ async function runSyncStep(tenantId: string) {
   }
   const corsair = getCorsair();
   if (!corsair) throw new AppError("NOT_CONFIGURED", "Corsair is not configured.");
-  const quiet = quietLeft();
+  const quiet = quietLeft(tenantId);
   if (quiet > 0) return { done: false, progress: 0, detail: "Gmail is pausing so the rest of your mail can load.", waitMs: quiet };
   const rows = await getDb().select().from(syncState).where(eq(syncState.tenantId, tenantId));
   const current = rows.find((row) => row.plugin === "gmail");
@@ -201,7 +206,7 @@ async function runSyncStep(tenantId: string) {
       await refreshRecent(tenant, tenantId);
     } catch (error) {
       if (shouldPause(apiReason(error))) {
-        hushGmail();
+        hushGmail(tenantId);
         console.error("[sync] gmail blocked", apiReason(error));
         return { done: false, progress: current?.progress ?? 0, detail: "Gmail is pausing so the rest of your mail can load.", waitMs: 25_000 };
       }
@@ -214,12 +219,12 @@ async function runSyncStep(tenantId: string) {
   } catch (error) {
     console.error("[sync]", apiReason(error));
     if (shouldPause(apiReason(error))) {
-      hushGmail();
+      hushGmail(tenantId);
       return { done: false, progress: current?.progress ?? 0, detail: "Gmail is pausing so the rest of your mail can load.", waitMs: 25_000 };
     }
     const app = toAppError(error);
     if (app.code === "RATE_LIMIT") {
-      hushGmail();
+      hushGmail(tenantId);
       return { done: false, progress: current?.progress ?? 0, detail: "Gmail is pausing so the rest of your mail can load.", waitMs: 25_000 };
     }
     if (app.code === "AUTH_MISSING" || app.code === "RECONNECT") {
