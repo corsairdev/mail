@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx scripts/dev.ts",
+    "dev": "node --env-file-if-exists=.env.local --env-file-if-exists=.env --import tsx scripts/dev.ts",
+    "compose": "docker compose up -d --wait",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
