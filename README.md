@@ -34,4 +34,5 @@ Watches get renewed by `/api/cron/renew-watches` (see `vercel.json`). It expects
 
 ```bash
 pnpm typecheck
+pnpm test:unit
 ```

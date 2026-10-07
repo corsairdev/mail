@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRaw, buildRfc822 } from "./mail/mime";
-import { parseGmailQuery } from "./mail/parse";
 import { expandRecurrence } from "./calendar/recurrence";
+import { toAppError } from "./errors";
+import { gmailPushAddress } from "./gmail-push";
+import { categoryOf, inFolder, threadLabelIds } from "./mail/folders";
+import { buildRaw, buildRfc822 } from "./mail/mime";
+import { extractBodies, parseAddress, parseGmailQuery, senderName } from "./mail/parse";
+import { blockRemoteImages, sanitizeEmailHtml } from "./mail/sanitize";
 
 test("raw email is base64url and keeps reply headers", () => {
   const raw = buildRaw({
@@ -53,4 +57,44 @@ test("weekly recurrence expands inside the window", () => {
   );
   assert.equal(copies.length, 4);
   assert.equal(copies[1]?.id.startsWith("evt_"), true);
+});
+
+test("a trashed copy does not hide the live message", () => {
+  const labels = threadLabelIds([
+    { labelIds: ["TRASH"] },
+    { labelIds: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"] },
+  ]);
+  assert.equal(inFolder(labels, "inbox"), true);
+  assert.equal(inFolder(labels, "trash"), false);
+  assert.equal(categoryOf(labels), "primary");
+});
+
+test("promotions stay out of primary", () => {
+  const labels = ["INBOX", "CATEGORY_PROMOTIONS"];
+  assert.equal(categoryOf(labels), "promotions");
+  assert.equal(inFolder(labels, "inbox"), true);
+});
+
+test("address and body parsing", () => {
+  assert.deepEqual(parseAddress('Ada Lovelace <ada@mail.dev>'), { name: "Ada Lovelace", email: "ada@mail.dev" });
+  assert.equal(senderName("", "ada.lovelace@mail.dev"), "Ada Lovelace");
+  const html = Buffer.from("<p>Hello</p>").toString("base64url");
+  const bodies = extractBodies({ mimeType: "text/html", body: { data: html } });
+  assert.equal(bodies.html, "<p>Hello</p>");
+  assert.equal(sanitizeEmailHtml('<p>Hi</p><script>alert(1)</script>').includes("script"), false);
+  assert.match(blockRemoteImages('<img src="https://evil.test/a.png">'), /data-remote-image/);
+});
+
+test("gmail push address is the mailbox, not the query string", () => {
+  const data = Buffer.from(JSON.stringify({ emailAddress: "Ada@Mail.dev", historyId: "9" })).toString("base64");
+  assert.equal(gmailPushAddress({ message: { data } }), "ada@mail.dev");
+  assert.equal(gmailPushAddress({ message: { data: "%%%" } }), null);
+  assert.equal(gmailPushAddress({}), null);
+});
+
+test("quota errors pause instead of looking like a random failure", () => {
+  const error = Object.assign(new Error("Forbidden"), {
+    body: { error: { message: "Quota exceeded for quota metric 'Total Query Cost'" } },
+  });
+  assert.equal(toAppError(error).code, "RATE_LIMIT");
 });

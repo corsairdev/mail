@@ -15,10 +15,10 @@ import {
 } from "../demo/store";
 import { buildRaw } from "./mime";
 import { decodeEntities, extractAttachments, extractBodies, headerValue, parseAddress, parseGmailQuery, senderName } from "./parse";
+import { categoryOf, inFolder, threadLabelIds, type Category, type Folder } from "./folders";
 import { sanitizeEmailHtml } from "./sanitize";
 
-export type Folder = "inbox" | "starred" | "sent" | "drafts" | "trash" | "spam" | "label";
-export type Category = "primary" | "social" | "promotions";
+export type { Category, Folder };
 
 export type ThreadSummary = {
   id: string;
@@ -53,25 +53,6 @@ export type MailLabel = { id: string; name: string; type: "system" | "user"; unr
 
 type Normalized = MailMessage & { snippet: string };
 
-function inFolder(labels: string[], folder: Folder, labelId?: string): boolean {
-  const has = (id: string) => labels.includes(id);
-  if (folder === "trash") return has("TRASH");
-  if (folder === "spam") return has("SPAM") && !has("TRASH");
-  if (has("TRASH") || has("SPAM")) return false;
-  if (folder === "label") return labelId ? has(labelId) : false;
-  if (folder === "starred") return has("STARRED");
-  if (folder === "sent") return has("SENT");
-  if (folder === "drafts") return has("DRAFT");
-  return has("INBOX");
-}
-
-function categoryOf(labels: string[]): Category | "other" {
-  if (labels.includes("CATEGORY_SOCIAL")) return "social";
-  if (labels.includes("CATEGORY_PROMOTIONS")) return "promotions";
-  if (labels.includes("CATEGORY_PERSONAL") || labels.includes("INBOX")) return "primary";
-  return "other";
-}
-
 function summarize(messages: Normalized[]): ThreadSummary[] {
   const groups = new Map<string, Normalized[]>();
   for (const message of messages) {
@@ -83,8 +64,7 @@ function summarize(messages: Normalized[]): ThreadSummary[] {
     const sorted = [...list].sort((a, b) => +new Date(a.date) - +new Date(b.date));
     const latest = sorted[sorted.length - 1] ?? sorted[0];
     if (!latest) throw new Error("Empty thread");
-    const live = sorted.filter((item) => !item.labelIds.includes("TRASH") && !item.labelIds.includes("SPAM"));
-    const labels = [...new Set((live.length ? live : sorted).flatMap((item) => item.labelIds))];
+    const labels = threadLabelIds(sorted);
     const incoming = [...sorted].reverse().find((item) => !item.labelIds.includes("SENT")) ?? latest;
     return {
       id: latest.threadId,
